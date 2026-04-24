@@ -1,5 +1,12 @@
 # Thanx Take-Home: A Senior/Staff Engineer's Implementation Guide
 
+> **Revision 2** — Tightened after first agentic planning pass surfaced defects in r1:
+> §2 redemption flow now requires raised exceptions (not bare `return`) for early exits, and explicitly mandates locking BOTH user and reward.
+> §3 adds SQLite pragma configuration (`foreign_keys: ON`, WAL journal mode).
+> §4 defines `Reward#available?` and its required spec coverage.
+> §10 concurrency spec adds `Concurrent::CyclicBarrier` rendezvous and a second spec for stock exhaustion.
+> Idempotency keys are explicitly out of scope for the take-home.
+
 ## What This Guide Synthesizes
 
 Every "do" and "don't" below maps to actual praise or criticism from Thanx senior engineers reviewing prior submissions. The bar is consistently described as **Senior to Staff Engineer**, with three concentrated emphases:
@@ -34,12 +41,14 @@ Almost every reviewer commented on this. Get it wrong and the submission fails r
 ### Required properties
 
 1. Wrap the operation in `ActiveRecord::Base.transaction`.
-2. **Take a pessimistic lock on the user inside the transaction** (`user.lock!` or `User.lock.find(id)`), *before* checking balance.
-3. Re-read the points balance from the locked record. Do not trust the controller's user object.
-4. Re-check reward availability inside the lock (in case stock matters).
-5. Decrement balance, create the Redemption row, decrement reward stock — all in one transaction.
-6. On any validation failure, raise to roll back; never leave half-applied state.
-7. The endpoint is idempotent against duplicate clicks (use a client-supplied request key OR a uniqueness constraint that's safe to retry).
+2. **Take pessimistic locks on BOTH the user AND the reward inside the transaction** (`User.lock.find(id)` and `Reward.lock.find(id)`), *before* any check. The user lock protects balance integrity; the reward lock protects stock integrity. Both are required.
+3. Re-read the points balance from the locked record. Do not trust the controller's user object — it loaded its `points_balance` before the lock was acquired and is potentially stale.
+4. Re-read reward availability from the locked reward record (active flag, stock count).
+5. Decrement balance, create the Redemption row, decrement reward stock — all inside the same transaction.
+6. **Early exits use raised exceptions, not bare `return`.** Inside an `ActiveRecord::Base.transaction` block, a bare `return` exits the block normally and *commits* whatever has happened so far. This is currently safe because the guards run before any mutation, but it's a footgun: if a future change adds a write above the guard, the transaction silently commits a partial result. Use a custom exception class (e.g., `Redemptions::Create::InvalidRedemption`) raised inside the transaction and caught outside. This makes the rollback semantics unambiguous.
+7. The DB-level `CHECK (points_balance >= 0)` constraint is the final backstop. Even if every application-level guard is bypassed, the database refuses to commit a negative balance.
+
+Idempotency against double-click is **out of scope** for the take-home — the transaction + lock + DB check is sufficient correctness machinery. Note this scope cut in the README's "trade-offs" section, alongside how a production version would add a client-supplied request key.
 
 ### Architectural pattern: Command / Interactor object
 
@@ -49,6 +58,8 @@ The redemption logic does **not** belong in the controller and does **not** belo
 # app/services/redemptions/create.rb
 module Redemptions
   class Create
+    InvalidRedemption = Class.new(StandardError)
+
     Result = Struct.new(:success?, :redemption, :errors, keyword_init: true)
 
     def self.call(**args) = new(**args).call
@@ -59,35 +70,32 @@ module Redemptions
     end
 
     def call
-      ActiveRecord::Base.transaction do
+      redemption = ActiveRecord::Base.transaction do
         locked_user = User.lock.find(@user.id)
         reward = Reward.lock.find(@reward_id)
 
-        return failure("Reward unavailable") unless reward.available?
-        return failure("Insufficient points") if locked_user.points_balance < reward.cost
+        raise InvalidRedemption, "Reward unavailable"   unless reward.available?
+        raise InvalidRedemption, "Insufficient points"  if locked_user.points_balance < reward.cost
 
         locked_user.update!(points_balance: locked_user.points_balance - reward.cost)
         reward.update!(stock: reward.stock - 1) if reward.stock.present?
 
-        redemption = Redemption.create!(
+        Redemption.create!(
           user: locked_user,
           reward: reward,
-          points_spent: reward.cost
+          points_spent: reward.cost,
         )
-
-        success(redemption)
       end
-    rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotFound => e
-      failure(e.message)
+
+      Result.new(success?: true, redemption: redemption, errors: [])
+    rescue InvalidRedemption, ActiveRecord::RecordInvalid, ActiveRecord::RecordNotFound => e
+      Result.new(success?: false, redemption: nil, errors: [e.message])
     end
-
-    private
-
-    def success(redemption) = Result.new(success?: true, redemption: redemption, errors: [])
-    def failure(msg)        = Result.new(success?: false, redemption: nil, errors: [msg])
   end
 end
 ```
+
+`Reward#available?` is defined on the model (see §4) as `active? && (stock.nil? || stock > 0)`.
 
 ### Reviewer phrases this addresses verbatim
 
@@ -102,6 +110,26 @@ end
 ## 3. Database Design
 
 Reviewers read migrations carefully. Several called out missing constraints, missing indexes, and missing uniqueness.
+
+### Database engine: SQLite, configured properly
+
+The challenge specifies SQLite. Production at Thanx uses MySQL; mention this distinction in the README's "trade-offs" section but do not switch engines. Two pragmas are non-negotiable:
+
+```yaml
+# config/database.yml
+default: &default
+  adapter: sqlite3
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+  timeout: 5000
+  pragmas:
+    journal_mode: WAL       # better concurrent reads
+    foreign_keys: ON        # enforce FK constraints (off by default historically)
+    synchronous: NORMAL
+```
+
+Without `foreign_keys: ON`, SQLite silently ignores foreign key constraints — your DB-level integrity guarantees are off and you won't notice until production. Verify after scaffolding by running `PRAGMA foreign_keys` in `bin/rails console` and confirming the result is `1`.
+
+SQLite serializes writes at the file level, so the pessimistic locks in §2 behave correctly but via a different mechanism than MySQL/Postgres `SELECT ... FOR UPDATE`. The concurrency spec still passes; just don't be surprised by the underlying behavior.
 
 ### Required for every table
 
@@ -165,6 +193,34 @@ Do not skip the DB-level guard. A reviewer wrote: "user has no balance validatio
 - Add aliases that obscure meaning ("Unnecessary aliases => makes the code less readable").
 - Add methods that exist only to be called from specs ("Method `redeem_reward` is only called from specs").
 - Add unused methods at all — every line is reviewed.
+
+### Required model methods
+
+`Reward` exposes a single availability predicate used by the service and the serializer:
+
+```ruby
+class Reward < ApplicationRecord
+  has_many :redemptions, dependent: :restrict_with_error
+
+  validates :name, :cost, :category, presence: true
+  validates :cost, numericality: { greater_than: 0 }
+  validates :stock, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
+
+  scope :active, -> { where(active: true) }
+
+  # Available means listed AND has remaining stock (or unlimited stock).
+  # Used by Redemptions::Create and surfaced to the frontend via the serializer.
+  def available?
+    active? && (stock.nil? || stock.positive?)
+  end
+end
+```
+
+The model spec must cover all four branches of `available?`:
+- active + unlimited stock → true
+- active + positive stock → true
+- active + zero stock → false
+- inactive (regardless of stock) → false
 
 ---
 
@@ -343,18 +399,23 @@ Required spec types:
 - **Service object specs** for the redemption interactor.
 - **A concurrency spec** for the redemption flow. Use threads with a shared barrier to fire two redemptions simultaneously and assert exactly one succeeds. **This single test will distinguish you.**
 
+The barrier is essential. Without it, thread 1 may finish its entire transaction before thread 2 starts, making the test pass even with broken locking. `Concurrent::CyclicBarrier` (from `concurrent-ruby`, already a Rails dependency) forces both threads to rendezvous at the start of the operation:
+
 ```ruby
 # spec/services/redemptions/create_concurrency_spec.rb
-require 'rails_helper'
+require "rails_helper"
 
 RSpec.describe Redemptions::Create do
   it "prevents double-spend under concurrent requests" do
-    user = create(:user, points_balance: 100)
+    user   = create(:user, points_balance: 100)
     reward = create(:reward, cost: 100, stock: 5)
+
+    barrier = Concurrent::CyclicBarrier.new(2)
 
     threads = 2.times.map do
       Thread.new do
         ActiveRecord::Base.connection_pool.with_connection do
+          barrier.wait
           described_class.call(user: user, reward_id: reward.id)
         end
       end
@@ -366,8 +427,31 @@ RSpec.describe Redemptions::Create do
     expect(user.reload.points_balance).to eq(0)
     expect(Redemption.count).to eq(1)
   end
+
+  it "prevents over-redemption when stock would be exhausted" do
+    user   = create(:user, points_balance: 1_000)
+    reward = create(:reward, cost: 100, stock: 1)
+
+    barrier = Concurrent::CyclicBarrier.new(2)
+
+    threads = 2.times.map do
+      Thread.new do
+        ActiveRecord::Base.connection_pool.with_connection do
+          barrier.wait
+          described_class.call(user: user, reward_id: reward.id)
+        end
+      end
+    end
+    results = threads.map(&:value)
+
+    expect(results.count(&:success?)).to eq(1)
+    expect(reward.reload.stock).to eq(0)
+    expect(Redemption.count).to eq(1)
+  end
 end
 ```
+
+The second spec, exercising stock exhaustion, justifies the reward lock from §2 — without locking the reward, two threads with sufficient balance could both redeem the last unit.
 
 Stack: `rspec-rails`, `factory_bot_rails`, `faker`, `shoulda-matchers`.
 
@@ -470,11 +554,14 @@ Spend the time saved on: tests, the concurrency test, README polish, AGENTS.md, 
 
 **Backend**
 - [ ] `rails new --api` mode
-- [ ] Pessimistic lock on user inside redemption transaction
-- [ ] Affordability check inside the lock
+- [ ] SQLite configured with `foreign_keys: ON` and `journal_mode: WAL`
+- [ ] Pessimistic locks on **both** user and reward inside redemption transaction
+- [ ] Affordability check and availability check inside the locks
+- [ ] Service uses raised exceptions (not bare `return`) for early exits
 - [ ] DB constraints: NOT NULL, indexes on FKs, CHECK on `points_balance >= 0`
 - [ ] Compound index `[user_id, created_at]` on redemptions
 - [ ] Service object for redemption (`Redemptions::Create`)
+- [ ] `Reward#available?` defined on the model with all four branches spec'd
 - [ ] Thin controllers using `before_action` and strong params
 - [ ] Serializer library used consistently
 - [ ] Idempotent seeds (`find_or_create_by!`, not `create!`)
@@ -482,7 +569,8 @@ Spend the time saved on: tests, the concurrency test, README polish, AGENTS.md, 
 - [ ] Rubocop clean (zero offenses)
 - [ ] Brakeman clean
 - [ ] Request specs (not controller specs)
-- [ ] Concurrency spec for redemption
+- [ ] Concurrency spec uses `Concurrent::CyclicBarrier` to force thread rendezvous
+- [ ] Concurrency spec covers both balance exhaustion AND stock exhaustion
 - [ ] Model + service + request specs all green
 
 **Frontend**

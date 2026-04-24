@@ -75,6 +75,10 @@ pnpm lint                                 # eslint only
 
 …but always run the full `check` before declaring a task complete or committing.
 
+## SQL and DB config
+
+SQLite must run with foreign_keys: ON and WAL journal mode. Both are configured in config/database.yml under the pragmas: key — do not remove them.
+
 ## Working loop
 
 For any non-trivial change, follow this loop:

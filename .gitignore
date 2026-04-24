@@ -2,3 +2,12 @@ log/
 storage/
 tmp/
 
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Private notes not for submission
+.private/

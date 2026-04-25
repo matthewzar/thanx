@@ -1,73 +1,63 @@
-# React + TypeScript + Vite
+# Thanx Rewards — Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + TypeScript + Vite frontend for the Thanx rewards redemption app. Talks to the Rails API at `http://localhost:3000`.
 
-Currently, two official plugins are available:
+## Prerequisites
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Node 24+
+- pnpm 10+
 
-## React Compiler
+## Setup
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+cd frontend
+pnpm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Running
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+pnpm dev        # starts Vite dev server at http://localhost:5173
 ```
+
+The backend must be running at `http://localhost:3000` before the app will load data. See the root `README.md` for how to start both servers.
+
+## Environment
+
+| Variable       | Default | Purpose                             |
+|----------------|---------|-------------------------------------|
+| `VITE_USER_ID` | `1`     | Identifies the user via `X-User-Id` header sent with every API request |
+
+Create a `.env.local` to override: `VITE_USER_ID=2`.
+
+## Verification
+
+```bash
+pnpm check        # full gate: eslint + typecheck + vitest + vite build
+pnpm lint         # eslint only
+pnpm typecheck    # tsc -b --noEmit only
+pnpm test         # vitest run only
+pnpm test:watch   # vitest in watch mode
+```
+
+A change is not complete until `pnpm check` passes clean.
+
+## Project layout
+
+```
+src/
+├── features/          # one folder per domain (rewards, redemptions, points)
+│   └── <name>/
+│       ├── types.ts
+│       ├── api.ts
+│       ├── hooks.ts
+│       └── components/
+├── components/        # shared presentational primitives only
+├── lib/               # api-client, query-client, query-keys
+├── pages/             # thin route components
+└── test/              # MSW server, handlers, vitest setup
+```
+
+## Conventions
+
+See [`AGENTS.md`](AGENTS.md) for the full conventions reference: canonical examples, the recipe for adding a feature folder, and patterns to avoid.

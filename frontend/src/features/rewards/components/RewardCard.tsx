@@ -1,10 +1,12 @@
 import type { Reward } from '../types'
+import { RedeemButton } from './RedeemButton'
 
 interface RewardCardProps {
   reward: Reward
+  userBalance: number
 }
 
-export function RewardCard({ reward }: RewardCardProps) {
+export function RewardCard({ reward, userBalance }: RewardCardProps) {
   return (
     <div
       className={`flex flex-col rounded-lg border bg-white p-6 shadow-sm transition-opacity${
@@ -33,6 +35,9 @@ export function RewardCard({ reward }: RewardCardProps) {
         <span className="rounded-full bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-700">
           {reward.category}
         </span>
+      </div>
+      <div className="mt-auto pt-4">
+        <RedeemButton reward={reward} userBalance={userBalance} />
       </div>
     </div>
   )

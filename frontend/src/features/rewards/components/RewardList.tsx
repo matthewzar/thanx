@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { EmptyState } from '../../../components/EmptyState'
+import { useUser } from '../../points/hooks'
 import { useRewards } from '../hooks'
 import type { Reward } from '../types'
 import { RewardCard } from './RewardCard'
@@ -8,7 +9,7 @@ type SortOption = 'cost-asc' | 'cost-desc' | 'name-asc'
 
 function RewardCardSkeleton() {
   return (
-    <div className="animate-pulse rounded-lg border bg-white p-6 shadow-sm">
+    <div className="animate-pulse flex flex-col rounded-lg border bg-white p-6 shadow-sm">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1 space-y-2">
           <div className="h-5 w-3/4 rounded bg-gray-200" />
@@ -17,6 +18,7 @@ function RewardCardSkeleton() {
         <div className="h-7 w-20 shrink-0 rounded bg-gray-200" />
       </div>
       <div className="mt-3 h-5 w-16 rounded bg-gray-100" />
+      <div className="mt-auto pt-4 h-9 rounded bg-gray-200" />
     </div>
   )
 }
@@ -31,6 +33,9 @@ function sortRewards(rewards: Reward[], sortBy: SortOption): Reward[] {
 
 export function RewardList() {
   const { data: rewards, isLoading, error } = useRewards()
+  const { data: user } = useUser()
+  const userBalance = user?.points_balance ?? 0
+
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState<SortOption>('cost-asc')
   const [selectedCategory, setSelectedCategory] = useState('')
@@ -114,7 +119,7 @@ export function RewardList() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {sorted.map((reward) => (
-            <RewardCard key={reward.id} reward={reward} />
+            <RewardCard key={reward.id} reward={reward} userBalance={userBalance} />
           ))}
         </div>
       )}

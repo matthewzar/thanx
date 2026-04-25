@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import * as Tooltip from '@radix-ui/react-tooltip'
 import { http, HttpResponse } from 'msw'
 import type { ReactNode } from 'react'
 import { server } from '../../../test/server'
@@ -9,7 +10,11 @@ import { RewardList } from './RewardList'
 function makeWrapper() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return function Wrapper({ children }: { children: ReactNode }) {
-    return <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    return (
+      <QueryClientProvider client={qc}>
+        <Tooltip.Provider>{children}</Tooltip.Provider>
+      </QueryClientProvider>
+    )
   }
 }
 

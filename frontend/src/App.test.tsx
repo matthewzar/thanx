@@ -1,10 +1,10 @@
-import { render, screen } from "@testing-library/react";
-import { describe, it, expect } from "vitest";
-import App from "./App";
+import { render, screen, waitFor } from '@testing-library/react'
+import App from './App'
 
-describe("App", () => {
-  it("renders", () => {
-    render(<App />);
-    expect(screen.getByRole("heading", { name: /get started/i })).toBeInTheDocument();
-  });
-});
+describe('App', () => {
+  it('renders the rewards page heading', async () => {
+    render(<App />)
+    expect(screen.getByRole('heading', { name: /rewards/i })).toBeInTheDocument()
+    await waitFor(() => screen.getByText('Free Coffee'))
+  })
+})

@@ -18,7 +18,7 @@ bin/rails db:setup   # creates DB, loads schema, seeds demo data
 bin/rails server     # listens on http://localhost:3000
 ```
 
-The frontend Vite dev server runs on port 5173; CORS is pre-configured for that origin.
+CORS is configured in config/initializers/cors.rb to allow requests from http://localhost:5173 (Vite's dev server) in development.
 
 ## Test
 
@@ -38,12 +38,6 @@ Authentication uses an `X-User-Id` request header — a deliberate scope cut. Se
 ## Architecture notes
 
 - Redemption logic lives in `app/services/redemptions/create.rb` (command object pattern). Controllers are thin wrappers.
-- The redemption endpoint is transactionally safe under concurrent requests: pessimistic row locks on both the user and the reward are acquired before any balance or stock check. A concurrency spec with a `CyclicBarrier` proves this.
+- The redemption endpoint is transactionally safe under concurrent requests: pessimistic row locks on both the user and the reward are acquired before any balance or stock check. A concurrency test with a `CyclicBarrier` proves this.
 - Serialization uses [Alba](https://github.com/okuramasafumi/alba). Responses are bare objects/arrays — no root-key envelope.
 - Background jobs use Solid Queue (Rails 8 default). `RedemptionConfirmationJob` is a stub ready for a notification implementation.
-
-## Trade-offs and what I'd do with more time
-
-- **Auth**: `X-User-Id` is a development stub. Production would use Devise + devise-jwt; the seam is one method in `ApplicationController`.
-- **Deployment**: Would deploy via Fly.io or Render (both support SQLite with persistent volumes). A `fly.toml` would take ~20 minutes to wire up.
-- **Rate limiting**: `rack-attack` would be added alongside real auth to protect the redemption endpoint.

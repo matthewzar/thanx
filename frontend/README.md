@@ -58,6 +58,8 @@ src/
 └── test/              # MSW server, handlers, vitest setup
 ```
 
+Start with `src/features/rewards/` for the read-only data flow and `src/features/redemptions/` for the mutation flow.
+
 ## Conventions
 
 See [`AGENTS.md`](AGENTS.md) for the full conventions reference: canonical examples, the recipe for adding a feature folder, and patterns to avoid.

@@ -48,6 +48,8 @@ If you are about to add a dependency, change a convention, or skip a section fro
 
 Each `features/<name>/` folder contains its own `components/`, `api.ts`, `hooks.ts`, `types.ts`. Do not put business logic in the root `components/` folder — that folder is for presentational primitives only.
 
+This is a single repository, not a multi-repo workspace. Do not initialize git inside backend/ or frontend/, and do not configure either as a submodule. If git status from the repo root cannot see your work, that's a sign something has been initialized incorrectly — stop and surface it rather than working around it.
+
 ## Verification commands
 
 Each app has a single command that runs the full check suite:

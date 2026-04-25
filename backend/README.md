@@ -1,24 +1,49 @@
-# README
+# Backend — Rails 8 API
 
-This README would normally document whatever steps are necessary to get the
-application up and running.
+Ruby 3.4.3 · Rails 8.0 · SQLite (WAL mode) · Puma
 
-Things you may want to cover:
+## Setup
 
-* Ruby version
+```bash
+cd backend
+bundle install
+bin/rails db:setup   # creates DB, loads schema, seeds demo data
+```
 
-* System dependencies
+`db:setup` seeds one user (`demo@example.com`, id=1, 1500 pts) and eight rewards across four categories.
 
-* Configuration
+## Run
 
-* Database creation
+```bash
+bin/rails server     # listens on http://localhost:3000
+```
 
-* Database initialization
+The frontend Vite dev server runs on port 5173; CORS is pre-configured for that origin.
 
-* How to run the test suite
+## Test
 
-* Services (job queues, cache servers, search engines, etc.)
+```bash
+bin/check            # full gate: rubocop, rspec, brakeman, bundle-audit (run before every commit)
+bin/test             # rspec only
+bin/test spec/services/redemptions/   # one directory
+bundle exec rubocop -A                # autofix style offences
+```
 
-* Deployment instructions
+## API
 
-* ...
+See [`../docs/API.md`](../docs/API.md) for the full contract (routes, headers, request/response shapes, curl examples).
+
+Authentication uses an `X-User-Id` request header — a deliberate scope cut. See the API doc for details.
+
+## Architecture notes
+
+- Redemption logic lives in `app/services/redemptions/create.rb` (command object pattern). Controllers are thin wrappers.
+- The redemption endpoint is transactionally safe under concurrent requests: pessimistic row locks on both the user and the reward are acquired before any balance or stock check. A concurrency spec with a `CyclicBarrier` proves this.
+- Serialization uses [Alba](https://github.com/okuramasafumi/alba). Responses are bare objects/arrays — no root-key envelope.
+- Background jobs use Solid Queue (Rails 8 default). `RedemptionConfirmationJob` is a stub ready for a notification implementation.
+
+## Trade-offs and what I'd do with more time
+
+- **Auth**: `X-User-Id` is a development stub. Production would use Devise + devise-jwt; the seam is one method in `ApplicationController`.
+- **Deployment**: Would deploy via Fly.io or Render (both support SQLite with persistent volumes). A `fly.toml` would take ~20 minutes to wire up.
+- **Rate limiting**: `rack-attack` would be added alongside real auth to protect the redemption endpoint.

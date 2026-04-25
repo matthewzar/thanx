@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -e
+bundle exec rubocop
+bundle exec rspec
+bundle exec brakeman --no-pager --quiet
+bundle exec bundle-audit check --update
